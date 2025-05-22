@@ -1,8 +1,11 @@
 import os
 import sys
 import threading
+import tkinter as tk
+from tkinter import messagebox
 import click
 import customtkinter as ctk
+from tkinter import StringVar, Listbox
 from rich.console import Console
 
 from utils.github import get_available_versions, download_version
@@ -16,6 +19,105 @@ from utils.process import start_application, stop_application, get_process_statu
 from utils.config import get_version_config
 
 console = Console()
+
+# Custom listbox implementation for customtkinter
+class CustomListbox(ctk.CTkFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+        
+        # Create a frame for the listbox
+        self.listbox_frame = ctk.CTkFrame(self)
+        self.listbox_frame.pack(fill="both", expand=True)
+        
+        # Create a scrollable frame
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.listbox_frame)
+        self.scrollable_frame.pack(fill="both", expand=True)
+        
+        # List to store the items
+        self.items = []
+        self.selected_index = None
+        self.callback = None
+        
+    def insert(self, index, item):
+        """Insert an item at the specified index"""
+        if index == "end":
+            index = len(self.items)
+            
+        # Create a button for the item
+        btn = ctk.CTkButton(
+            self.scrollable_frame, 
+            text=item,
+            anchor="w",
+            fg_color="transparent",
+            text_color=("black", "white"),
+            hover_color=("gray80", "gray20"),
+            corner_radius=0,
+            height=30,
+            command=lambda i=len(self.items): self.select_item(i)
+        )
+        btn.pack(fill="x", padx=2, pady=1)
+        
+        # Add the item to the list
+        self.items.append({"text": item, "button": btn})
+    
+    def delete(self, start, end=None):
+        """Delete items from start to end"""
+        if end == "end":
+            end = len(self.items)
+        elif end is None:
+            end = start + 1
+            
+        # Remove the buttons
+        for i in range(start, end):
+            if i < len(self.items):
+                self.items[i]["button"].destroy()
+        
+        # Remove the items from the list
+        self.items = self.items[:start] + self.items[end:]
+        self.selected_index = None
+    
+    def select_item(self, index):
+        """Select an item"""
+        # Deselect the previously selected item
+        if self.selected_index is not None and self.selected_index < len(self.items):
+            self.items[self.selected_index]["button"].configure(
+                fg_color="transparent"
+            )
+        
+        # Select the new item
+        self.selected_index = index
+        self.items[index]["button"].configure(
+            fg_color=("gray70", "gray30")
+        )
+        
+        # Call the callback
+        if self.callback:
+            self.callback(self.items[index]["text"])
+    
+    def bind(self, sequence, func, add=None):
+        """Bind an event to the listbox"""
+        # We only care about the command binding
+        if sequence == "<<ListboxSelect>>":
+            self.callback = func
+    
+    def get(self, index=None):
+        """Get the selected item or item at index"""
+        if index is not None:
+            if 0 <= index < len(self.items):
+                return self.items[index]["text"]
+            return None
+        
+        if self.selected_index is not None and 0 <= self.selected_index < len(self.items):
+            return self.items[self.selected_index]["text"]
+        
+        return None
+    
+    def configure(self, **kwargs):
+        """Configure the listbox"""
+        if "command" in kwargs:
+            self.callback = kwargs["command"]
+        
+        super().configure(**kwargs)
 
 class FgGui(ctk.CTk):
     def __init__(self):
@@ -48,6 +150,9 @@ class FgGui(ctk.CTk):
         self.installed_versions = []
         self.running_processes = []
         
+        # Status message label
+        self.status_text = None
+        
         # Initial data load
         self.refresh_data()
     
@@ -63,7 +168,7 @@ class FgGui(ctk.CTk):
         # Available versions list (left side)
         ctk.CTkLabel(frame_left, text="Available Versions", font=("Arial", 16, "bold")).pack(pady=5)
         
-        self.available_listbox = ctk.CTkListbox(frame_left, command=self.on_available_select)
+        self.available_listbox = CustomListbox(frame_left)
         self.available_listbox.pack(fill="both", expand=True, padx=10, pady=10)
         
         btn_install = ctk.CTkButton(frame_left, text="Install Selected", command=self.install_selected)
@@ -75,7 +180,7 @@ class FgGui(ctk.CTk):
         # Installed versions list (right side)
         ctk.CTkLabel(frame_right, text="Installed Versions", font=("Arial", 16, "bold")).pack(pady=5)
         
-        self.installed_listbox = ctk.CTkListbox(frame_right, command=self.on_installed_select)
+        self.installed_listbox = CustomListbox(frame_right)
         self.installed_listbox.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Buttons for installed versions
@@ -97,7 +202,7 @@ class FgGui(ctk.CTk):
         # Running processes list
         ctk.CTkLabel(frame, text="Running Instances", font=("Arial", 16, "bold")).pack(pady=5)
         
-        self.running_listbox = ctk.CTkListbox(frame, command=self.on_running_select)
+        self.running_listbox = CustomListbox(frame)
         self.running_listbox.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Buttons for running instances
@@ -110,12 +215,27 @@ class FgGui(ctk.CTk):
         btn_refresh_running = ctk.CTkButton(btn_frame, text="Refresh", command=self.refresh_running)
         btn_refresh_running.pack(side="right", padx=5, expand=True, fill="x")
     
+    def set_status(self, message):
+        """Set or update status message"""
+        # Remove existing status if any
+        self.clear_status()
+        
+        # Create new status label
+        self.status_text = ctk.CTkLabel(self, text=message, font=("Arial", 12))
+        self.status_text.pack(side="bottom", fill="x", padx=10, pady=5)
+        self.update_idletasks()
+    
+    def clear_status(self):
+        """Clear the status message"""
+        if self.status_text is not None:
+            self.status_text.destroy()
+            self.status_text = None
+            self.update_idletasks()
+    
     def refresh_data(self):
         """Refresh data from GitHub and local installations"""
         # Show loading status
-        self.status_text = ctk.CTkLabel(self, text="Loading data...", font=("Arial", 12))
-        self.status_text.pack(side="bottom", fill="x", padx=10, pady=5)
-        self.update_idletasks()
+        self.set_status("Loading data...")
         
         # Start a thread to fetch data
         threading.Thread(target=self._fetch_data, daemon=True).start()
@@ -149,9 +269,8 @@ class FgGui(ctk.CTk):
         # Update running processes listbox
         self.refresh_running()
         
-        # Remove loading status
-        if hasattr(self, 'status_text'):
-            self.status_text.destroy()
+        # Clear status
+        self.clear_status()
     
     def refresh_running(self):
         """Refresh the list of running processes"""
@@ -191,9 +310,7 @@ class FgGui(ctk.CTk):
                 return
         
         # Download and install
-        self.status_text = ctk.CTkLabel(self, text=f"Installing {version}...", font=("Arial", 12))
-        self.status_text.pack(side="bottom", fill="x", padx=10, pady=5)
-        self.update_idletasks()
+        self.set_status(f"Installing {version}...")
         
         # Install in a background thread
         threading.Thread(target=self._install_version, args=(version,), daemon=True).start()
@@ -203,7 +320,7 @@ class FgGui(ctk.CTk):
         zip_path = download_version(version)
         
         if not zip_path:
-            self.after(100, lambda: self.show_message("Error", f"Failed to download version {version}"))
+            self.after(100, lambda: self._handle_failed_download(version))
             return
         
         success = install_from_zip(zip_path, version)
@@ -211,8 +328,17 @@ class FgGui(ctk.CTk):
         # Update UI
         self.after(100, lambda: self._finish_installation(version, success))
     
+    def _handle_failed_download(self, version):
+        """Handle failed download"""
+        self.clear_status()
+        self.show_message("Error", f"Failed to download version {version}")
+    
     def _finish_installation(self, version, success):
         """Handle installation completion"""
+        # Clear the status message first
+        self.clear_status()
+        
+        # Show success/error message
         if success:
             self.show_message("Success", f"Version {version} installed successfully")
         else:
@@ -220,10 +346,6 @@ class FgGui(ctk.CTk):
         
         # Refresh data
         self.refresh_data()
-        
-        # Remove status text
-        if hasattr(self, 'status_text'):
-            self.status_text.destroy()
     
     def start_selected(self):
         """Start the selected version"""
@@ -255,7 +377,7 @@ class FgGui(ctk.CTk):
         success = stop_application(pid)
         
         if success:
-            self.show_message("Success", f"Process {pid} stopped successfully")
+            self.show_message("Success", f"Application (PID: {pid}) stopped successfully")
             self.refresh_running()
         else:
             self.show_message("Error", f"Failed to stop process {pid}")
@@ -282,14 +404,13 @@ class FgGui(ctk.CTk):
     
     def show_message(self, title, message):
         """Show a message dialog"""
-        dialog = ctk.CTkMessagebox(self, title=title, message=message)
-        dialog.show()
+        # Using standard messagebox from tkinter instead of CTkInputDialog
+        messagebox.showinfo(title, message)
     
     def ask_confirmation(self, message):
         """Ask for confirmation"""
-        dialog = ctk.CTkMessagebox(self, title="Confirmation", message=message, 
-                                 option_1="Yes", option_2="No")
-        return dialog.get() == "Yes"
+        # Using standard messagebox from tkinter for confirmation
+        return messagebox.askyesno("Confirmation", message)
 
 @click.command()
 def gui():
