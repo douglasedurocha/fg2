@@ -1,100 +1,108 @@
-# FG - Gerenciador de Aplicação Java
+# FG - Java Application Manager
 
-Um gerenciador de linha de comando (CLI) para baixar, configurar e executar diferentes versões de uma aplicação Java.
+A simple CLI tool to manage different versions of a Java application.
 
-## Funcionalidades
+## Features
 
-* Listar versões disponíveis da aplicação Java no GitHub (`fg available`)
-* Listar versões instaladas localmente (`fg list`)
-* Instalar versões específicas (`fg install <versão>`)
-* Instalar a versão mais recente (`fg update`)
-* Verificar o status das instâncias em execução (`fg status`)
-* Visualizar logs de instâncias (`fg logs [pid]`)
-* Parar instâncias em execução (`fg stop [pid]`)
-* Desinstalar versões (`fg uninstall <versão>`)
-* Iniciar a aplicação (`fg start [versão]`)
-* Interface gráfica (`fg gui`)
-* Visualizar configuração de uma versão (`fg config <versão>`)
+- List available versions from GitHub releases
+- Install specific versions
+- Update to the latest version
+- Start and stop application instances
+- Monitor running instances
+- View application logs
+- Graphical user interface
 
-## Requisitos
+## Installation
 
-- Python 3.7+
-- Conexão com a Internet para baixar aplicações e JDKs
-
-## Instalação
-
-1. Clone o repositório ou baixe os arquivos
-2. Instale as dependências:
-
-```bash
+1. Clone this repository
+2. Install dependencies:
+```
 pip install -r requirements.txt
 ```
-
-3. Torne o script executável (Linux/Mac):
-
-```bash
+3. Make the script executable:
+```
 chmod +x fg.py
 ```
 
-4. (Opcional) Crie um link simbólico para facilitar o uso (Linux/Mac):
+## Usage
 
-```bash
-sudo ln -s $(pwd)/fg.py /usr/local/bin/fg
+### List available versions
+```
+python fg.py available
 ```
 
-## Uso
-
-### Verificar versões disponíveis
-```bash
-./fg.py available
+### List installed versions
+```
+python fg.py list
 ```
 
-### Instalar uma versão específica
-```bash
-./fg.py install 1.0.0
+### Install a specific version
+```
+python fg.py install 1.0.0
 ```
 
-### Listar versões instaladas
-```bash
-./fg.py list
+### Update to the latest version
+```
+python fg.py update
 ```
 
-### Iniciar a aplicação
-```bash
-./fg.py start 1.0.0
+### Show configuration for a specific version
+```
+python fg.py config 1.0.0
 ```
 
-### Verificar instâncias em execução
-```bash
-./fg.py status
+### Start an application
+```
+python fg.py start 1.0.0
 ```
 
-### Visualizar logs
-```bash
-./fg.py logs 1234
+### Check status of running instances
+```
+python fg.py status
 ```
 
-### Parar uma instância
-```bash
-./fg.py stop 1234
+### View logs for a specific instance
+```
+python fg.py logs <pid> --tail 100
 ```
 
-### Desinstalar uma versão
-```bash
-./fg.py uninstall 1.0.0
+### Stop a running instance
+```
+python fg.py stop <pid>
 ```
 
-### Iniciar a interface gráfica
-```bash
-./fg.py gui
+### Uninstall a version
+```
+python fg.py uninstall 1.0.0
 ```
 
-## Diretórios
+### Launch the graphical interface
+```
+python fg.py gui
+```
 
-- `~/.fg/installed` - Versões instaladas
-- `~/.fg/jdk` - JDKs instalados
-- `~/.fg/logs` - Logs das aplicações
+## File Structure
 
-## Compatibilidade
+```
+fg/
+├── commands/          # CLI commands
+├── utils/             # Utility functions
+├── fg.py              # Main entry point
+├── README.md          # Documentation
+└── requirements.txt   # Dependencies
+```
 
-O FG é compatível com Linux, macOS e Windows. 
+## Dependencies
+
+- click: Command line interface creation
+- requests: HTTP client for GitHub API
+- rich: Terminal formatting and display
+- psutil: Process management
+- customtkinter: GUI toolkit
+
+## Configuration
+
+The tool stores all data in the `~/.fg` directory:
+- `~/.fg/versions/`: Installed versions
+- `~/.fg/logs/`: Application logs
+- `~/.fg/downloads/`: Downloaded packages 

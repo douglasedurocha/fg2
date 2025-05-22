@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
 import os
+import sys
 import click
 from rich.console import Console
 
-console = Console()
-
-@click.group()
-def cli():
-    """
-    fg - CLI para gerenciar versões da aplicação Java
-    """
-    # Criar diretório de configuração se não existir
-    os.makedirs(os.path.expanduser("~/.fg"), exist_ok=True)
-    os.makedirs(os.path.expanduser("~/.fg/logs"), exist_ok=True)
-    os.makedirs(os.path.expanduser("~/.fg/installed"), exist_ok=True)
-    os.makedirs(os.path.expanduser("~/.fg/jdk"), exist_ok=True)
-
-# Importar comandos
+# Import commands
 from commands.available import available
 from commands.list import list_installed
 from commands.install import install
@@ -29,7 +17,22 @@ from commands.start import start
 from commands.gui import gui
 from commands.config import config
 
-# Registrar comandos
+console = Console()
+
+@click.group()
+def cli():
+    """
+    CLI tool for managing Java application versions.
+    """
+    # Create fg directory in user's home if it doesn't exist
+    fg_dir = os.path.join(os.path.expanduser("~"), ".fg")
+    os.makedirs(fg_dir, exist_ok=True)
+    
+    # Create necessary subdirectories
+    os.makedirs(os.path.join(fg_dir, "versions"), exist_ok=True)
+    os.makedirs(os.path.join(fg_dir, "logs"), exist_ok=True)
+
+# Register commands
 cli.add_command(available)
 cli.add_command(list_installed, name="list")
 cli.add_command(install)

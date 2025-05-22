@@ -1,36 +1,28 @@
+import os
 import click
 from rich.console import Console
 from rich.table import Table
-from utils.config import get_installed_versions
+
+from utils.installer import get_installed_versions, get_versions_dir
 
 console = Console()
 
 @click.command()
 def list_installed():
-    """Listar versões instaladas."""
-    console.print("Verificando versões instaladas...")
+    """List installed versions."""
     versions = get_installed_versions()
     
     if not versions:
-        console.print("[bold yellow]Nenhuma versão instalada.[/]")
+        console.print("No versions installed", style="yellow")
         return
     
-    # Ordenar versões
-    versions.sort(key=lambda x: x["version"], reverse=True)
-    
-    # Criar tabela
-    table = Table(title="Versões Instaladas")
-    table.add_column("Versão", style="cyan")
-    table.add_column("Nome", style="green")
-    table.add_column("JDK", style="yellow")
-    table.add_column("Localização", style="blue")
+    # Create a table to display installed versions
+    table = Table(title="Installed Versions")
+    table.add_column("Version", style="cyan")
+    table.add_column("Location", style="green")
     
     for version in versions:
-        table.add_row(
-            version["version"],
-            version["name"],
-            version["jdk_version"],
-            version["path"]
-        )
+        version_dir = os.path.join(get_versions_dir(), version)
+        table.add_row(version, version_dir)
     
     console.print(table) 

@@ -1,44 +1,36 @@
 import click
 from rich.console import Console
-from utils.config import get_installed_versions, get_version_config
-from utils.process import run_application
+
+from utils.process import start_application
+from utils.installer import is_version_installed, get_installed_versions
 
 console = Console()
 
 @click.command()
-@click.argument("version", required=False)
+@click.argument('version', required=False)
 def start(version):
-    """Iniciar uma instância da aplicação."""
-    # Se não for fornecida uma versão, listar versões instaladas e pedir para escolher
-    if version is None:
-        installed_versions = get_installed_versions()
-        
-        if not installed_versions:
-            console.print("[bold yellow]Nenhuma versão instalada.[/]")
-            return
-        
-        # Ordenar versões
-        installed_versions.sort(key=lambda x: x["version"], reverse=True)
-        
-        console.print("Versões instaladas:")
-        for i, v in enumerate(installed_versions, 1):
-            console.print(f"  {i}. {v['version']} - {v['name']} (JDK {v['jdk_version']})")
-        
-        choice = click.prompt("Escolha uma versão para iniciar", type=int, default=1)
-        
-        if choice < 1 or choice > len(installed_versions):
-            console.print("[bold red]Escolha inválida.[/]")
-            return
-        
-        version = installed_versions[choice - 1]["version"]
-    
-    # Verificar se a versão está instalada
+    """Start an application."""
     installed_versions = get_installed_versions()
-    installed_version_numbers = [v["version"] for v in installed_versions]
     
-    if version not in installed_version_numbers:
-        console.print(f"[bold red]Versão {version} não está instalada.[/]")
+    # If no version specified, use the latest installed
+    if not version:
+        if not installed_versions:
+            console.print("No versions installed", style="yellow")
+            return
+        
+        version = installed_versions[-1]  # Use the last installed version
+        console.print(f"No version specified, using latest installed: {version}", style="cyan")
+    
+    # Check if version is installed
+    if not is_version_installed(version):
+        console.print(f"Version {version} is not installed", style="bold red")
+        console.print("Use 'fg install {version}' to install it", style="yellow")
         return
     
-    # Iniciar a aplicação
-    run_application(version) 
+    # Start the application
+    pid = start_application(version)
+    
+    if pid:
+        console.print(f"Aplicação iniciada com sucesso. PID: {pid}", style="bold green")
+    else:
+        console.print("Failed to start the application", style="bold red") 

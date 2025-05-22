@@ -1,18 +1,17 @@
 import os
 import json
 import requests
-import zipfile
-import tempfile
 from rich.console import Console
 
 console = Console()
 
-GITHUB_REPO = "douglasedurocha/java-app"
-GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
-RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
+GITHUB_API_URL = "https://api.github.com/repos/douglasedurocha/java-app/releases"
+GITHUB_DOWNLOAD_URL = "https://github.com/douglasedurocha/java-app/releases/download"
 
 def get_available_versions():
-    """Obter todas as versões disponíveis no GitHub."""
+    """
+    Get all available versions from GitHub releases.
+    """
     try:
         response = requests.get(GITHUB_API_URL)
         response.raise_for_status()
@@ -20,85 +19,50 @@ def get_available_versions():
         
         versions = []
         for release in releases:
-            # Extrair a versão do nome da tag (ex: "v1.0.0" -> "1.0.0")
-            version = release["tag_name"].lstrip("v")
+            # Extract version from tag_name (removing 'v' prefix if present)
+            version = release['tag_name']
+            if version.startswith('v'):
+                version = version[1:]
+            
             versions.append({
-                "version": version,
-                "published_at": release["published_at"],
-                "download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{version}/java-app-{version}.zip"
+                'version': version,
+                'published_at': release['published_at'],
+                'assets': release['assets']
             })
         
         return versions
-    except requests.RequestException as e:
-        console.print(f"[bold red]Erro ao obter versões:[/] {str(e)}")
+    except requests.exceptions.RequestException as e:
+        console.print(f"[bold red]Error fetching available versions: {str(e)}[/bold red]")
         return []
 
 def download_version(version):
-    """Baixar uma versão específica da aplicação."""
-    versions = get_available_versions()
-    download_url = None
+    """
+    Download a specific version zip file.
     
-    for v in versions:
-        if v["version"] == version:
-            download_url = v["download_url"]
-            break
+    Args:
+        version (str): Version to download
+        
+    Returns:
+        str: Path to downloaded file or None if failed
+    """
+    zip_filename = f"java-app-{version}.zip"
+    download_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/{zip_filename}"
+    download_path = os.path.join(os.path.expanduser("~"), ".fg", "downloads", zip_filename)
     
-    if not download_url:
-        console.print(f"[bold red]Versão {version} não encontrada[/]")
-        return None
+    # Create downloads directory if it doesn't exist
+    os.makedirs(os.path.dirname(download_path), exist_ok=True)
     
     try:
-        console.print(f"Baixando versão {version}...")
+        console.print(f"Downloading [bold cyan]{version}[/bold cyan] from GitHub...")
         response = requests.get(download_url, stream=True)
         response.raise_for_status()
         
-        # Criar um arquivo temporário para o download
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
-            temp_path = temp_file.name
+        with open(download_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
-                temp_file.write(chunk)
+                f.write(chunk)
         
-        return temp_path
-    except requests.RequestException as e:
-        console.print(f"[bold red]Erro ao baixar versão {version}:[/] {str(e)}")
-        return None
-
-def find_manifest_file(dir_path):
-    """Encontrar o arquivo fgmanifest.json recursivamente."""
-    for root, dirs, files in os.walk(dir_path):
-        if "fgmanifest.json" in files:
-            return os.path.join(root, "fgmanifest.json")
-    return None
-
-def extract_version(zip_path, version):
-    """Extrair a versão baixada para o diretório de instalação."""
-    install_dir = os.path.expanduser(f"~/.fg/installed/{version}")
-    os.makedirs(install_dir, exist_ok=True)
-    
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(install_dir)
-        
-        # Verificar se o arquivo fgmanifest.json existe (recursivamente)
-        manifest_path = find_manifest_file(install_dir)
-        if not manifest_path:
-            console.print(f"[bold red]Arquivo fgmanifest.json não encontrado na versão {version}[/]")
-            return None
-        
-        # Carregar o manifesto
-        with open(manifest_path, 'r') as f:
-            manifest = json.load(f)
-        
-        # Copiar o manifesto para a raiz do diretório de instalação
-        import shutil
-        root_manifest_path = os.path.join(install_dir, "fgmanifest.json")
-        if manifest_path != root_manifest_path:
-            shutil.copy(manifest_path, root_manifest_path)
-        
-        # Remover o arquivo ZIP temporário
-        os.unlink(zip_path)
-        
-        return manifest
-    except (zipfile.BadZipFile, json.JSONDecodeError, OSError) as e:
-        console.print(f"[bold red]Erro ao extrair versão {version}:[/] {str(e)}")
-        return None
+        console.print(f"Downloaded [bold green]{version}[/bold green] successfully")
+        return download_path
+    except requests.exceptions.RequestException as e:
+        console.print(f"[bold red]Error downloading version {version}: {str(e)}[/bold red]")
+        return None 

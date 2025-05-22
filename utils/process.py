@@ -1,190 +1,247 @@
 import os
-import sys
 import json
 import time
 import psutil
+import platform
 import subprocess
 from datetime import datetime
 from rich.console import Console
-from utils.github import find_manifest_file
+
+from utils.installer import get_fg_dir, get_versions_dir, get_logs_dir, get_manifest_path
 
 console = Console()
 
-def run_application(version):
-    """Executar a aplicação Java para a versão especificada."""
-    # Obter o diretório de instalação
-    install_dir = os.path.expanduser(f"~/.fg/installed/{version}")
-    if not os.path.exists(install_dir):
-        console.print(f"[bold red]Versão {version} não está instalada.[/]")
-        return None
+# File to store running processes information
+PROCESSES_FILE = os.path.join(get_fg_dir(), "processes.json")
+
+def load_processes():
+    """Load information about running processes"""
+    if os.path.exists(PROCESSES_FILE):
+        try:
+            with open(PROCESSES_FILE, 'r') as f:
+                processes = json.load(f)
+            
+            # Filter out processes that are no longer running
+            valid_processes = {}
+            for pid_str, process_info in processes.items():
+                pid = int(pid_str)
+                if psutil.pid_exists(pid):
+                    try:
+                        # Check if it's our process
+                        proc = psutil.Process(pid)
+                        if proc.is_running():
+                            valid_processes[pid_str] = process_info
+                    except:
+                        pass
+            
+            return valid_processes
+        except Exception as e:
+            console.print(f"[yellow]Warning: Failed to load processes file: {str(e)}[/yellow]")
     
-    # Procurar o manifesto recursivamente
-    manifest_path = find_manifest_file(install_dir)
-    if not manifest_path:
-        console.print(f"[bold red]Arquivo fgmanifest.json não encontrado para a versão {version}.[/]")
+    return {}
+
+def save_processes(processes):
+    """Save information about running processes"""
+    try:
+        with open(PROCESSES_FILE, 'w') as f:
+            json.dump(processes, f, indent=2)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Failed to save processes file: {str(e)}[/yellow]")
+
+def start_application(version):
+    """
+    Start the application for a specific version
+    
+    Args:
+        version (str): Version to start
+        
+    Returns:
+        int: Process ID if successful, None otherwise
+    """
+    version_dir = os.path.join(get_versions_dir(), version)
+    manifest_path = get_manifest_path(version)
+    
+    if not os.path.exists(manifest_path):
+        console.print(f"[bold red]Version {version} is not installed[/bold red]")
         return None
     
     try:
+        # Load manifest
         with open(manifest_path, 'r') as f:
             manifest = json.load(f)
         
-        # Obter o caminho do JDK
-        from utils.jdk import get_java_path
-        jdk_dir = os.path.expanduser(f"~/.fg/jdk/jdk-{manifest['jdk']['version']}")
-        if not os.path.exists(jdk_dir):
-            console.print(f"[bold red]JDK {manifest['jdk']['version']} não está instalado.[/]")
+        # Get run command from manifest
+        run_command = manifest.get('runCommand')
+        if not run_command:
+            console.print(f"[bold red]No run command found in manifest for version {version}[/bold red]")
             return None
         
-        java_path = get_java_path(jdk_dir)
-        if not os.path.exists(java_path):
-            console.print(f"[bold red]Executável Java não encontrado em {java_path}[/]")
-            return None
+        # Create log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = os.path.join(get_logs_dir(), f"{version}_{timestamp}.log")
         
-        # Preparar o comando para executar a aplicação
-        run_command = manifest["runCommand"]
+        # Build classpath including dependencies
+        classpath = []
         
-        # Substituir 'java' pelo caminho completo do java
-        run_command = run_command.replace("java ", f"{java_path} ")
+        # Add main jar
+        jar_name = f"java-app-{version}.jar"
+        jar_path = os.path.join(version_dir, jar_name)
+        if os.path.exists(jar_path):
+            classpath.append(jar_path)
         
-        # Criar diretório de logs se não existir
-        logs_dir = os.path.expanduser("~/.fg/logs")
-        os.makedirs(logs_dir, exist_ok=True)
+        # Add dependency jars
+        libs_dir = os.path.join(version_dir, "libs")
+        if os.path.exists(libs_dir):
+            for jar in os.listdir(libs_dir):
+                if jar.endswith(".jar"):
+                    classpath.append(os.path.join(libs_dir, jar))
         
-        # Arquivos de log
-        log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        stdout_log = os.path.join(logs_dir, f"{version}_{log_timestamp}.log")
-        stderr_log = os.path.join(logs_dir, f"{version}_{log_timestamp}.err")
+        # Modify the run command to include the classpath if it doesn't already
+        if "-cp" not in run_command and "-classpath" not in run_command:
+            classpath_str = os.pathsep.join(classpath)
+            run_command = run_command.replace("java ", f"java -cp {classpath_str} ")
         
-        # Executar a aplicação
-        console.print(f"Iniciando aplicação versão {version}...")
+        # Open log file
+        log_file_handle = open(log_file, 'w')
         
-        # Obter o diretório onde está o JAR (o mesmo diretório do manifesto)
-        jar_dir = os.path.dirname(manifest_path)
+        # Split command into args for subprocess
+        if platform.system() == "Windows":
+            process = subprocess.Popen(run_command, shell=True, cwd=version_dir,
+                                      stdout=log_file_handle, stderr=subprocess.STDOUT)
+        else:
+            args = run_command.split()
+            process = subprocess.Popen(args, cwd=version_dir,
+                                      stdout=log_file_handle, stderr=subprocess.STDOUT)
         
-        # Substituir o diretório de trabalho
-        os.chdir(jar_dir)
+        # Store process information
+        processes = load_processes()
+        processes[str(process.pid)] = {
+            'version': version,
+            'start_time': time.time(),
+            'log_file': log_file
+        }
+        save_processes(processes)
         
-        # Executar o processo em background
-        with open(stdout_log, 'w') as out, open(stderr_log, 'w') as err:
-            process = subprocess.Popen(
-                run_command,
-                shell=True,
-                stdout=out,
-                stderr=err,
-                text=True
-            )
-        
-        # Registrar o processo
-        pid = process.pid
-        register_process(version, pid, stdout_log, stderr_log)
-        
-        console.print(f"[bold green]Aplicação iniciada com sucesso. PID: {pid}[/]")
-        return pid
+        console.print(f"[bold green]Application started successfully. PID: {process.pid}[/bold green]")
+        return process.pid
+    
     except Exception as e:
-        console.print(f"[bold red]Erro ao executar a aplicação:[/] {str(e)}")
+        console.print(f"[bold red]Error starting version {version}: {str(e)}[/bold red]")
         return None
 
-def register_process(version, pid, stdout_log, stderr_log):
-    """Registrar um processo em execução."""
-    processes_file = os.path.expanduser("~/.fg/processes.json")
+def stop_application(pid):
+    """
+    Stop a running application
     
-    # Carregar processos existentes
-    processes = {}
-    if os.path.exists(processes_file):
+    Args:
+        pid (int or str): Process ID to stop
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        pid = int(pid)
+        processes = load_processes()
+        
+        if str(pid) not in processes:
+            console.print(f"[bold yellow]PID {pid} is not a managed application[/bold yellow]")
+            return False
+        
+        # Try to terminate the process
         try:
-            with open(processes_file, 'r') as f:
-                processes = json.load(f)
-        except:
-            processes = {}
-    
-    # Adicionar novo processo
-    processes[str(pid)] = {
-        "version": version,
-        "start_time": time.time(),
-        "stdout_log": stdout_log,
-        "stderr_log": stderr_log
-    }
-    
-    # Salvar arquivo de processos
-    with open(processes_file, 'w') as f:
-        json.dump(processes, f, indent=2)
-
-def unregister_process(pid):
-    """Remover um processo do registro."""
-    processes_file = os.path.expanduser("~/.fg/processes.json")
-    
-    # Carregar processos existentes
-    if not os.path.exists(processes_file):
-        return
-    
-    try:
-        with open(processes_file, 'r') as f:
-            processes = json.load(f)
-        
-        # Remover processo
-        if str(pid) in processes:
-            del processes[str(pid)]
-        
-        # Salvar arquivo de processos
-        with open(processes_file, 'w') as f:
-            json.dump(processes, f, indent=2)
-    except Exception as e:
-        console.print(f"[bold red]Erro ao desregistrar processo {pid}:[/] {str(e)}")
-
-def get_running_processes():
-    """Obter todos os processos em execução."""
-    processes_file = os.path.expanduser("~/.fg/processes.json")
-    
-    if not os.path.exists(processes_file):
-        return {}
-    
-    try:
-        with open(processes_file, 'r') as f:
-            processes = json.load(f)
-        
-        # Verificar se os processos ainda estão em execução
-        running_processes = {}
-        for pid, info in processes.items():
-            try:
-                process = psutil.Process(int(pid))
-                if process.is_running():
-                    running_processes[pid] = info
-                else:
-                    # Processo não está mais em execução
-                    unregister_process(int(pid))
-            except:
-                # Processo não existe mais
-                unregister_process(int(pid))
-        
-        return running_processes
-    except Exception as e:
-        console.print(f"[bold red]Erro ao obter processos em execução:[/] {str(e)}")
-        return {}
-
-def stop_process(pid):
-    """Parar um processo em execução."""
-    try:
-        process = psutil.Process(int(pid))
-        if process.is_running():
+            process = psutil.Process(pid)
             process.terminate()
-            # Esperar um pouco para o processo finalizar
-            try:
-                process.wait(timeout=5)
-            except psutil.TimeoutExpired:
-                # Se não finalizar no timeout, mata forçadamente
+            process.wait(timeout=5)
+            
+            # If still running, force kill
+            if process.is_running():
                 process.kill()
             
-            unregister_process(int(pid))
-            console.print(f"[bold green]Instância da aplicação (PID: {pid}) parada com sucesso[/]")
-            return True
-        else:
-            console.print(f"[bold yellow]Processo {pid} não está em execução.[/]")
-            unregister_process(int(pid))
+            console.print(f"[bold green]Stopped application (PID: {pid})[/bold green]")
+        except psutil.NoSuchProcess:
+            console.print(f"[bold yellow]Process {pid} is no longer running[/bold yellow]")
+        except Exception as e:
+            console.print(f"[bold red]Error stopping process {pid}: {str(e)}[/bold red]")
             return False
-    except psutil.NoSuchProcess:
-        console.print(f"[bold yellow]Processo {pid} não existe.[/]")
-        unregister_process(int(pid))
+        
+        # Remove from processes file
+        if str(pid) in processes:
+            del processes[str(pid)]
+            save_processes(processes)
+        
+        return True
+    
+    except ValueError:
+        console.print(f"[bold red]Invalid PID: {pid}[/bold red]")
         return False
+
+def get_process_status():
+    """
+    Get status of all running applications
+    
+    Returns:
+        list: List of process status dictionaries
+    """
+    processes = load_processes()
+    status_list = []
+    
+    for pid_str, info in processes.items():
+        pid = int(pid_str)
+        try:
+            proc = psutil.Process(pid)
+            if proc.is_running():
+                status = {
+                    'pid': pid,
+                    'version': info['version'],
+                    'running': True,
+                    'start_time': datetime.fromtimestamp(info['start_time']).strftime("%Y-%m-%d %H:%M:%S"),
+                    'cpu_percent': proc.cpu_percent(interval=0.1),
+                    'memory_mb': proc.memory_info().rss / (1024 * 1024)
+                }
+            else:
+                status = {
+                    'pid': pid,
+                    'version': info['version'],
+                    'running': False,
+                    'start_time': datetime.fromtimestamp(info['start_time']).strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            status_list.append(status)
+        except:
+            # Process no longer exists, will be cleaned up on next load_processes call
+            pass
+    
+    return status_list
+
+def get_logs(pid, tail=None):
+    """
+    Get logs for a specific process
+    
+    Args:
+        pid (int or str): Process ID
+        tail (int, optional): Number of lines to return from the end
+        
+    Returns:
+        str: Log content
+    """
+    try:
+        pid = str(pid)
+        processes = load_processes()
+        
+        if pid not in processes:
+            return f"No logs found for PID {pid}"
+        
+        log_file = processes[pid].get('log_file')
+        if not log_file or not os.path.exists(log_file):
+            return f"Log file not found for PID {pid}"
+        
+        with open(log_file, 'r') as f:
+            if tail:
+                # Read the last 'tail' lines
+                lines = f.readlines()
+                return ''.join(lines[-tail:])
+            else:
+                # Read the entire file
+                return f.read()
+    
     except Exception as e:
-        console.print(f"[bold red]Erro ao parar processo {pid}:[/] {str(e)}")
-        return False
+        return f"Error reading logs: {str(e)}" 

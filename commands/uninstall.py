@@ -1,22 +1,22 @@
 import click
 from rich.console import Console
-from utils.config import get_installed_versions, uninstall_version
+
+from utils.installer import uninstall_version, is_version_installed
 
 console = Console()
 
 @click.command()
-@click.argument("version")
+@click.argument('version')
 def uninstall(version):
-    """Desinstalar uma versão específica."""
-    # Verificar se a versão está instalada
-    installed_versions = get_installed_versions()
-    installed_version_numbers = [v["version"] for v in installed_versions]
-    
-    if version not in installed_version_numbers:
-        console.print(f"[bold red]Versão {version} não está instalada.[/]")
+    """Uninstall a specific version."""
+    if not is_version_installed(version):
+        console.print(f"Version {version} is not installed", style="yellow")
         return
     
-    # Confirmar desinstalação
-    if click.confirm(f"Tem certeza que deseja desinstalar a versão {version}?", default=False):
-        # Desinstalar versão
-        uninstall_version(version) 
+    if click.confirm(f"Are you sure you want to uninstall version {version}?", default=False):
+        success = uninstall_version(version)
+        
+        if success:
+            console.print(f"Version {version} has been uninstalled", style="bold green")
+        else:
+            console.print(f"Failed to uninstall version {version}", style="bold red") 

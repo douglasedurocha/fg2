@@ -4,476 +4,296 @@ import threading
 import click
 import customtkinter as ctk
 from rich.console import Console
-from utils.config import get_installed_versions
-from utils.github import get_available_versions
-from utils.process import get_running_processes, stop_process, run_application
-from commands.install import install
+
+from utils.github import get_available_versions, download_version
+from utils.installer import (
+    get_installed_versions, 
+    install_from_zip, 
+    uninstall_version, 
+    is_version_installed
+)
+from utils.process import start_application, stop_application, get_process_status
+from utils.config import get_version_config
 
 console = Console()
 
-class FgApp(ctk.CTk):
+class FgGui(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        # Configurar janela
-        self.title("FG - Gerenciador de Aplicação Java")
+        # Configure window
+        self.title("FG - Java App Manager")
         self.geometry("800x600")
         
-        # Criar tabs
+        # Set the appearance mode and color theme
+        ctk.set_appearance_mode("System")
+        ctk.set_default_color_theme("blue")
+        
+        # Create tabs
         self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        self.tabview.pack(padx=10, pady=10, fill="both", expand=True)
         
-        # Criar abas
-        self.tab_installed = self.tabview.add("Instaladas")
-        self.tab_available = self.tabview.add("Disponíveis")
-        self.tab_running = self.tabview.add("Em Execução")
+        # Add tabs
+        self.tab_versions = self.tabview.add("Versions")
+        self.tab_running = self.tabview.add("Running")
         
-        # Configurar aba de versões instaladas
-        self.setup_installed_tab()
+        # Set up the versions tab
+        self.setup_versions_tab()
         
-        # Configurar aba de versões disponíveis
-        self.setup_available_tab()
-        
-        # Configurar aba de instâncias em execução
+        # Set up the running tab
         self.setup_running_tab()
         
-        # Iniciar com a aba de instaladas
-        self.tabview.set("Instaladas")
+        # Initialize data
+        self.available_versions = []
+        self.installed_versions = []
+        self.running_processes = []
         
-        # Carregar dados iniciais
-        self.refresh_all()
+        # Initial data load
+        self.refresh_data()
     
-    def setup_installed_tab(self):
-        # Frame de controle
-        control_frame = ctk.CTkFrame(self.tab_installed)
-        control_frame.pack(fill="x", padx=10, pady=10)
+    def setup_versions_tab(self):
+        """Set up the versions tab UI"""
+        # Create frames
+        frame_left = ctk.CTkFrame(self.tab_versions, width=300)
+        frame_left.pack(side="left", fill="both", padx=10, pady=10)
         
-        refresh_btn = ctk.CTkButton(control_frame, text="Atualizar", command=self.refresh_installed)
-        refresh_btn.pack(side="left", padx=10)
+        frame_right = ctk.CTkFrame(self.tab_versions)
+        frame_right.pack(side="right", fill="both", expand=True, padx=10, pady=10)
         
-        # Frame da lista
-        list_frame = ctk.CTkFrame(self.tab_installed)
-        list_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Available versions list (left side)
+        ctk.CTkLabel(frame_left, text="Available Versions", font=("Arial", 16, "bold")).pack(pady=5)
         
-        # Lista de versões instaladas
-        self.installed_listbox = ctk.CTkTextbox(list_frame, height=200)
-        self.installed_listbox.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Frame de ações
-        action_frame = ctk.CTkFrame(self.tab_installed)
-        action_frame.pack(fill="x", padx=10, pady=10)
-        
-        start_btn = ctk.CTkButton(action_frame, text="Iniciar", command=self.start_selected)
-        start_btn.pack(side="left", padx=10)
-        
-        uninstall_btn = ctk.CTkButton(action_frame, text="Desinstalar", command=self.uninstall_selected)
-        uninstall_btn.pack(side="left", padx=10)
-    
-    def setup_available_tab(self):
-        # Frame de controle
-        control_frame = ctk.CTkFrame(self.tab_available)
-        control_frame.pack(fill="x", padx=10, pady=10)
-        
-        refresh_btn = ctk.CTkButton(control_frame, text="Atualizar", command=self.refresh_available)
-        refresh_btn.pack(side="left", padx=10)
-        
-        # Frame da lista
-        list_frame = ctk.CTkFrame(self.tab_available)
-        list_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Lista de versões disponíveis
-        self.available_listbox = ctk.CTkTextbox(list_frame, height=200)
+        self.available_listbox = ctk.CTkListbox(frame_left, command=self.on_available_select)
         self.available_listbox.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Frame de ações
-        action_frame = ctk.CTkFrame(self.tab_available)
-        action_frame.pack(fill="x", padx=10, pady=10)
+        btn_install = ctk.CTkButton(frame_left, text="Install Selected", command=self.install_selected)
+        btn_install.pack(padx=10, pady=10, fill="x")
         
-        install_btn = ctk.CTkButton(action_frame, text="Instalar", command=self.install_selected)
-        install_btn.pack(side="left", padx=10)
+        btn_refresh = ctk.CTkButton(frame_left, text="Refresh", command=self.refresh_data)
+        btn_refresh.pack(padx=10, pady=10, fill="x")
+        
+        # Installed versions list (right side)
+        ctk.CTkLabel(frame_right, text="Installed Versions", font=("Arial", 16, "bold")).pack(pady=5)
+        
+        self.installed_listbox = ctk.CTkListbox(frame_right, command=self.on_installed_select)
+        self.installed_listbox.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Buttons for installed versions
+        btn_frame = ctk.CTkFrame(frame_right)
+        btn_frame.pack(fill="x", padx=10, pady=10)
+        
+        btn_start = ctk.CTkButton(btn_frame, text="Start", command=self.start_selected)
+        btn_start.pack(side="left", padx=5, expand=True, fill="x")
+        
+        btn_uninstall = ctk.CTkButton(btn_frame, text="Uninstall", command=self.uninstall_selected)
+        btn_uninstall.pack(side="right", padx=5, expand=True, fill="x")
     
     def setup_running_tab(self):
-        # Frame de controle
-        control_frame = ctk.CTkFrame(self.tab_running)
-        control_frame.pack(fill="x", padx=10, pady=10)
+        """Set up the running instances tab UI"""
+        # Create frame for running processes
+        frame = ctk.CTkFrame(self.tab_running)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        refresh_btn = ctk.CTkButton(control_frame, text="Atualizar", command=self.refresh_running)
-        refresh_btn.pack(side="left", padx=10)
+        # Running processes list
+        ctk.CTkLabel(frame, text="Running Instances", font=("Arial", 16, "bold")).pack(pady=5)
         
-        # Frame da lista
-        list_frame = ctk.CTkFrame(self.tab_running)
-        list_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Lista de instâncias em execução
-        self.running_listbox = ctk.CTkTextbox(list_frame, height=200)
+        self.running_listbox = ctk.CTkListbox(frame, command=self.on_running_select)
         self.running_listbox.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Frame de ações
-        action_frame = ctk.CTkFrame(self.tab_running)
-        action_frame.pack(fill="x", padx=10, pady=10)
+        # Buttons for running instances
+        btn_frame = ctk.CTkFrame(frame)
+        btn_frame.pack(fill="x", padx=10, pady=10)
         
-        stop_btn = ctk.CTkButton(action_frame, text="Parar", command=self.stop_selected)
-        stop_btn.pack(side="left", padx=10)
+        btn_stop = ctk.CTkButton(btn_frame, text="Stop Selected", command=self.stop_selected)
+        btn_stop.pack(side="left", padx=5, expand=True, fill="x")
         
-        logs_btn = ctk.CTkButton(action_frame, text="Ver Logs", command=self.view_logs)
-        logs_btn.pack(side="left", padx=10)
+        btn_refresh_running = ctk.CTkButton(btn_frame, text="Refresh", command=self.refresh_running)
+        btn_refresh_running.pack(side="right", padx=5, expand=True, fill="x")
     
-    def refresh_all(self):
-        """Atualizar todas as listas."""
-        self.refresh_installed()
-        self.refresh_available()
-        self.refresh_running()
+    def refresh_data(self):
+        """Refresh data from GitHub and local installations"""
+        # Show loading status
+        self.status_text = ctk.CTkLabel(self, text="Loading data...", font=("Arial", 12))
+        self.status_text.pack(side="bottom", fill="x", padx=10, pady=5)
+        self.update_idletasks()
+        
+        # Start a thread to fetch data
+        threading.Thread(target=self._fetch_data, daemon=True).start()
     
-    def refresh_installed(self):
-        """Atualizar lista de versões instaladas."""
-        self.installed_listbox.delete("0.0", "end")
+    def _fetch_data(self):
+        """Fetch data in a background thread"""
+        # Get available versions
+        self.available_versions = get_available_versions()
+        
+        # Get installed versions
         self.installed_versions = get_installed_versions()
         
-        if not self.installed_versions:
-            self.installed_listbox.insert("0.0", "Nenhuma versão instalada.")
-            return
+        # Get running processes
+        self.running_processes = get_process_status()
         
-        # Ordenar versões
-        self.installed_versions.sort(key=lambda x: x["version"], reverse=True)
-        
-        for i, version in enumerate(self.installed_versions, 1):
-            self.installed_listbox.insert("end", f"{i}. {version['version']} - {version['name']} (JDK {version['jdk_version']})\n")
+        # Update UI
+        self.after(100, self._update_ui_with_data)
     
-    def refresh_available(self):
-        """Atualizar lista de versões disponíveis."""
-        self.available_listbox.delete("0.0", "end")
-        self.available_listbox.insert("0.0", "Consultando versões disponíveis...\n")
+    def _update_ui_with_data(self):
+        """Update the UI with fetched data"""
+        # Update available versions listbox
+        self.available_listbox.delete(0, "end")
+        for version_info in self.available_versions:
+            self.available_listbox.insert("end", version_info['version'])
         
-        # Usar uma thread para não bloquear a interface
-        def fetch_available():
-            self.available_versions = get_available_versions()
-            
-            # Atualizar na thread principal
-            self.after(0, self.update_available_list)
+        # Update installed versions listbox
+        self.installed_listbox.delete(0, "end")
+        for version in self.installed_versions:
+            self.installed_listbox.insert("end", version)
         
-        threading.Thread(target=fetch_available, daemon=True).start()
-    
-    def update_available_list(self):
-        """Atualizar a lista de versões disponíveis após busca."""
-        self.available_listbox.delete("0.0", "end")
+        # Update running processes listbox
+        self.refresh_running()
         
-        if not self.available_versions:
-            self.available_listbox.insert("0.0", "Não foi possível obter as versões disponíveis.")
-            return
-        
-        # Ordenar versões
-        self.available_versions.sort(key=lambda x: x["version"], reverse=True)
-        
-        for i, version in enumerate(self.available_versions, 1):
-            self.available_listbox.insert("end", f"{i}. {version['version']} (Publicado em: {version['published_at'].split('T')[0]})\n")
+        # Remove loading status
+        if hasattr(self, 'status_text'):
+            self.status_text.destroy()
     
     def refresh_running(self):
-        """Atualizar lista de instâncias em execução."""
-        self.running_listbox.delete("0.0", "end")
-        self.running_processes = get_running_processes()
+        """Refresh the list of running processes"""
+        self.running_processes = get_process_status()
+        self.running_listbox.delete(0, "end")
         
-        if not self.running_processes:
-            self.running_listbox.insert("0.0", "Nenhuma instância em execução.")
-            return
-        
-        for i, (pid, info) in enumerate(self.running_processes.items(), 1):
-            self.running_listbox.insert("end", f"{i}. PID: {pid} - Versão: {info['version']}\n")
+        for proc in self.running_processes:
+            status = "Running" if proc.get('running', False) else "Stopped"
+            display_text = f"PID: {proc['pid']} - Version: {proc['version']} - {status}"
+            self.running_listbox.insert("end", display_text)
     
-    def get_selected_item(self, text_widget, items):
-        """Obter o item selecionado de uma lista."""
-        try:
-            text = text_widget.get("0.0", "end")
-            lines = text.strip().split("\n")
-            
-            if not lines or "Nenhuma" in lines[0]:
-                return None
-            
-            # Mostrar diálogo de seleção
-            dialog = ctk.CTkInputDialog(text="Digite o número do item:", title="Selecionar Item")
-            result = dialog.get_input()
-            
-            if not result:
-                return None
-            
-            try:
-                index = int(result) - 1
-                if 0 <= index < len(items):
-                    return items[index]
-                else:
-                    self.show_error("Número inválido.")
-                    return None
-            except ValueError:
-                self.show_error("Por favor, digite um número válido.")
-                return None
-        except Exception as e:
-            self.show_error(f"Erro ao selecionar item: {str(e)}")
-            return None
+    def on_available_select(self, selected_item):
+        """Handle selection of an available version"""
+        pass
     
-    def show_error(self, message):
-        """Mostrar mensagem de erro."""
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Erro")
-        dialog.geometry("300x150")
-        dialog.resizable(False, False)
-        
-        label = ctk.CTkLabel(dialog, text=message)
-        label.pack(pady=20)
-        
-        button = ctk.CTkButton(dialog, text="OK", command=dialog.destroy)
-        button.pack(pady=10)
-        
-        dialog.transient(self)
-        dialog.grab_set()
-        self.wait_window(dialog)
+    def on_installed_select(self, selected_item):
+        """Handle selection of an installed version"""
+        pass
     
-    def show_info(self, message):
-        """Mostrar mensagem informativa."""
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Informação")
-        dialog.geometry("300x150")
-        dialog.resizable(False, False)
-        
-        label = ctk.CTkLabel(dialog, text=message)
-        label.pack(pady=20)
-        
-        button = ctk.CTkButton(dialog, text="OK", command=dialog.destroy)
-        button.pack(pady=10)
-        
-        dialog.transient(self)
-        dialog.grab_set()
-        self.wait_window(dialog)
-    
-    def start_selected(self):
-        """Iniciar a versão selecionada."""
-        selected = self.get_selected_item(self.installed_listbox, self.installed_versions)
-        if not selected:
-            return
-        
-        version = selected["version"]
-        
-        # Executar em uma thread para não bloquear a interface
-        def start_app():
-            pid = run_application(version)
-            if pid:
-                # Atualizar lista de instâncias em execução
-                self.after(1000, self.refresh_running)
-                self.after(0, lambda: self.show_info(f"Aplicação iniciada com sucesso. PID: {pid}"))
-        
-        threading.Thread(target=start_app, daemon=True).start()
-    
-    def uninstall_selected(self):
-        """Desinstalar a versão selecionada."""
-        selected = self.get_selected_item(self.installed_listbox, self.installed_versions)
-        if not selected:
-            return
-        
-        version = selected["version"]
-        
-        # Confirmar desinstalação
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Confirmar")
-        dialog.geometry("400x150")
-        dialog.resizable(False, False)
-        
-        label = ctk.CTkLabel(dialog, text=f"Tem certeza que deseja desinstalar a versão {version}?")
-        label.pack(pady=20)
-        
-        button_frame = ctk.CTkFrame(dialog)
-        button_frame.pack(pady=10)
-        
-        confirm_btn = ctk.CTkButton(button_frame, text="Sim", command=lambda: self.confirm_uninstall(dialog, version))
-        confirm_btn.pack(side="left", padx=10)
-        
-        cancel_btn = ctk.CTkButton(button_frame, text="Não", command=dialog.destroy)
-        cancel_btn.pack(side="left", padx=10)
-        
-        dialog.transient(self)
-        dialog.grab_set()
-        self.wait_window(dialog)
-    
-    def confirm_uninstall(self, dialog, version):
-        """Confirmar e executar a desinstalação."""
-        dialog.destroy()
-        
-        from utils.config import uninstall_version
-        result = uninstall_version(version)
-        
-        if result:
-            self.show_info(f"Versão {version} desinstalada com sucesso.")
-            self.refresh_installed()
-        else:
-            self.show_error(f"Falha ao desinstalar versão {version}.")
+    def on_running_select(self, selected_item):
+        """Handle selection of a running process"""
+        pass
     
     def install_selected(self):
-        """Instalar a versão selecionada."""
-        selected = self.get_selected_item(self.available_listbox, self.available_versions)
-        if not selected:
+        """Install the selected version"""
+        selection = self.available_listbox.get()
+        if not selection:
+            self.show_message("Error", "Please select a version to install")
             return
         
-        version = selected["version"]
+        # Find the version in available_versions
+        version = selection
         
-        # Verificar se já está instalada
-        installed_versions = get_installed_versions()
-        installed_version_numbers = [v["version"] for v in installed_versions]
+        # Check if already installed
+        if is_version_installed(version):
+            if not self.ask_confirmation(f"Version {version} is already installed. Reinstall?"):
+                return
         
-        if version in installed_version_numbers:
-            self.show_info(f"Versão {version} já está instalada.")
-            return
+        # Download and install
+        self.status_text = ctk.CTkLabel(self, text=f"Installing {version}...", font=("Arial", 12))
+        self.status_text.pack(side="bottom", fill="x", padx=10, pady=5)
+        self.update_idletasks()
         
-        # Executar em uma thread para não bloquear a interface
-        def install_version():
-            # Redirect console output to capture it
-            class StreamCapture:
-                def __init__(self):
-                    self.data = ""
-                def write(self, data):
-                    self.data += data
-                def flush(self):
-                    pass
-            
-            stdout_capture = StreamCapture()
-            stderr_capture = StreamCapture()
-            
-            old_stdout, old_stderr = sys.stdout, sys.stderr
-            sys.stdout, sys.stderr = stdout_capture, stderr_capture
-            
-            try:
-                install.callback(version)
-                # Restaurar stdout/stderr
-                sys.stdout, sys.stderr = old_stdout, old_stderr
-                
-                # Atualizar a lista de versões instaladas
-                self.after(0, self.refresh_installed)
-                self.after(0, lambda: self.show_info(f"Versão {version} instalada com sucesso."))
-            except Exception as e:
-                # Restaurar stdout/stderr
-                sys.stdout, sys.stderr = old_stdout, old_stderr
-                self.after(0, lambda: self.show_error(f"Erro ao instalar versão {version}: {str(e)}"))
-        
-        self.show_info(f"Iniciando instalação da versão {version}. Isso pode levar algum tempo...")
-        threading.Thread(target=install_version, daemon=True).start()
+        # Install in a background thread
+        threading.Thread(target=self._install_version, args=(version,), daemon=True).start()
     
-    def stop_selected(self):
-        """Parar a instância selecionada."""
-        if not self.running_processes:
-            self.show_error("Nenhuma instância em execução.")
+    def _install_version(self, version):
+        """Install a version in a background thread"""
+        zip_path = download_version(version)
+        
+        if not zip_path:
+            self.after(100, lambda: self.show_message("Error", f"Failed to download version {version}"))
             return
         
-        # Converter para lista para indexação
-        pids = list(self.running_processes.keys())
-        processes = [{"pid": pid, "info": self.running_processes[pid]} for pid in pids]
+        success = install_from_zip(zip_path, version)
         
-        selected = self.get_selected_item(self.running_listbox, processes)
-        if not selected:
-            return
-        
-        pid = selected["pid"]
-        
-        # Confirmar parada
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Confirmar")
-        dialog.geometry("400x150")
-        dialog.resizable(False, False)
-        
-        label = ctk.CTkLabel(dialog, text=f"Tem certeza que deseja parar a instância com PID {pid}?")
-        label.pack(pady=20)
-        
-        button_frame = ctk.CTkFrame(dialog)
-        button_frame.pack(pady=10)
-        
-        confirm_btn = ctk.CTkButton(button_frame, text="Sim", command=lambda: self.confirm_stop(dialog, pid))
-        confirm_btn.pack(side="left", padx=10)
-        
-        cancel_btn = ctk.CTkButton(button_frame, text="Não", command=dialog.destroy)
-        cancel_btn.pack(side="left", padx=10)
-        
-        dialog.transient(self)
-        dialog.grab_set()
-        self.wait_window(dialog)
+        # Update UI
+        self.after(100, lambda: self._finish_installation(version, success))
     
-    def confirm_stop(self, dialog, pid):
-        """Confirmar e executar a parada."""
-        dialog.destroy()
+    def _finish_installation(self, version, success):
+        """Handle installation completion"""
+        if success:
+            self.show_message("Success", f"Version {version} installed successfully")
+        else:
+            self.show_message("Error", f"Failed to install version {version}")
         
-        result = stop_process(int(pid))
+        # Refresh data
+        self.refresh_data()
         
-        if result:
-            self.show_info(f"Instância com PID {pid} parada com sucesso.")
+        # Remove status text
+        if hasattr(self, 'status_text'):
+            self.status_text.destroy()
+    
+    def start_selected(self):
+        """Start the selected version"""
+        selection = self.installed_listbox.get()
+        if not selection:
+            self.show_message("Error", "Please select a version to start")
+            return
+        
+        # Start the application
+        pid = start_application(selection)
+        
+        if pid:
+            self.show_message("Success", f"Application started successfully. PID: {pid}")
             self.refresh_running()
         else:
-            self.show_error(f"Falha ao parar instância com PID {pid}.")
+            self.show_message("Error", "Failed to start the application")
     
-    def view_logs(self):
-        """Ver logs da instância selecionada."""
-        if not self.running_processes:
-            self.show_error("Nenhuma instância em execução.")
+    def stop_selected(self):
+        """Stop the selected process"""
+        selection = self.running_listbox.get()
+        if not selection:
+            self.show_message("Error", "Please select a process to stop")
             return
         
-        # Converter para lista para indexação
-        pids = list(self.running_processes.keys())
-        processes = [{"pid": pid, "info": self.running_processes[pid]} for pid in pids]
+        # Extract PID from the selection text
+        pid = selection.split(" - ")[0].replace("PID: ", "")
         
-        selected = self.get_selected_item(self.running_listbox, processes)
-        if not selected:
-            return
+        # Stop the process
+        success = stop_application(pid)
         
-        pid = selected["pid"]
-        log_file = self.running_processes[pid]["stdout_log"]
-        
-        if not os.path.exists(log_file):
-            self.show_error(f"Arquivo de log não encontrado: {log_file}")
-            return
-        
-        # Abrir janela com logs
-        log_window = ctk.CTkToplevel(self)
-        log_window.title(f"Logs - PID {pid}")
-        log_window.geometry("800x600")
-        
-        # Frame de controle
-        control_frame = ctk.CTkFrame(log_window)
-        control_frame.pack(fill="x", padx=10, pady=10)
-        
-        refresh_btn = ctk.CTkButton(control_frame, text="Atualizar", 
-                                   command=lambda: self.refresh_logs(log_text, log_file))
-        refresh_btn.pack(side="left", padx=10)
-        
-        close_btn = ctk.CTkButton(control_frame, text="Fechar", command=log_window.destroy)
-        close_btn.pack(side="right", padx=10)
-        
-        # Área de texto para logs
-        log_text = ctk.CTkTextbox(log_window, height=500)
-        log_text.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Carregar logs iniciais
-        self.refresh_logs(log_text, log_file)
-        
-        log_window.transient(self)
-        log_window.grab_set()
+        if success:
+            self.show_message("Success", f"Process {pid} stopped successfully")
+            self.refresh_running()
+        else:
+            self.show_message("Error", f"Failed to stop process {pid}")
     
-    def refresh_logs(self, text_widget, log_file):
-        """Atualizar conteúdo de logs."""
-        text_widget.delete("0.0", "end")
+    def uninstall_selected(self):
+        """Uninstall the selected version"""
+        selection = self.installed_listbox.get()
+        if not selection:
+            self.show_message("Error", "Please select a version to uninstall")
+            return
         
-        try:
-            with open(log_file, 'r') as f:
-                lines = f.readlines()
-                
-            if not lines:
-                text_widget.insert("0.0", "Arquivo de log vazio.")
-                return
-            
-            # Mostrar as últimas 100 linhas ou todas se houver menos
-            last_lines = lines[-100:] if len(lines) > 100 else lines
-            for line in last_lines:
-                text_widget.insert("end", line)
-            
-            # Rolar para o final
-            text_widget.see("end")
-        except Exception as e:
-            text_widget.insert("0.0", f"Erro ao ler arquivo de log: {str(e)}")
+        # Confirm uninstallation
+        if not self.ask_confirmation(f"Are you sure you want to uninstall version {selection}?"):
+            return
+        
+        # Uninstall the version
+        success = uninstall_version(selection)
+        
+        if success:
+            self.show_message("Success", f"Version {selection} uninstalled successfully")
+            self.refresh_data()
+        else:
+            self.show_message("Error", f"Failed to uninstall version {selection}")
+    
+    def show_message(self, title, message):
+        """Show a message dialog"""
+        dialog = ctk.CTkMessagebox(self, title=title, message=message)
+        dialog.show()
+    
+    def ask_confirmation(self, message):
+        """Ask for confirmation"""
+        dialog = ctk.CTkMessagebox(self, title="Confirmation", message=message, 
+                                 option_1="Yes", option_2="No")
+        return dialog.get() == "Yes"
 
 @click.command()
 def gui():
-    """Iniciar interface gráfica."""
-    app = FgApp()
+    """Launch the graphical user interface."""
+    # Initialize the GUI
+    app = FgGui()
     app.mainloop() 

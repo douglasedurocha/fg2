@@ -1,52 +1,41 @@
 import click
-import time
-from datetime import datetime, timedelta
 from rich.console import Console
 from rich.table import Table
-from utils.process import get_running_processes
+
+from utils.process import get_process_status
 
 console = Console()
 
 @click.command()
 def status():
-    """Verificar status das instâncias em execução."""
-    console.print("Verificando instâncias em execução...")
+    """Show status of running applications."""
+    processes = get_process_status()
     
-    running_processes = get_running_processes()
-    
-    if not running_processes:
-        console.print("[bold yellow]Nenhuma instância em execução.[/]")
+    if not processes:
+        console.print("No running applications", style="yellow")
         return
     
-    # Criar tabela
-    table = Table(title="Instâncias em Execução")
+    # Create a table to display running processes
+    table = Table(title="Running Applications")
     table.add_column("PID", style="cyan")
-    table.add_column("Versão", style="green")
-    table.add_column("Tempo de Execução", style="yellow")
-    table.add_column("Arquivo de Log", style="blue")
+    table.add_column("Version", style="green")
+    table.add_column("Status", style="magenta")
+    table.add_column("Start Time", style="blue")
+    table.add_column("CPU %", style="yellow")
+    table.add_column("Memory (MB)", style="red")
     
-    current_time = time.time()
-    
-    for pid, info in running_processes.items():
-        # Calcular tempo de execução
-        start_time = info["start_time"]
-        duration = timedelta(seconds=int(current_time - start_time))
-        
-        # Formatando duração
-        if duration.days > 0:
-            duration_str = f"{duration.days}d {duration.seconds // 3600}h {(duration.seconds // 60) % 60}m"
-        elif duration.seconds // 3600 > 0:
-            duration_str = f"{duration.seconds // 3600}h {(duration.seconds // 60) % 60}m {duration.seconds % 60}s"
-        elif (duration.seconds // 60) % 60 > 0:
-            duration_str = f"{(duration.seconds // 60) % 60}m {duration.seconds % 60}s"
-        else:
-            duration_str = f"{duration.seconds}s"
+    for proc in processes:
+        status_text = "Running" if proc.get('running', False) else "Stopped"
+        cpu = f"{proc.get('cpu_percent', 0):.1f}" if 'cpu_percent' in proc else "N/A"
+        memory = f"{proc.get('memory_mb', 0):.1f}" if 'memory_mb' in proc else "N/A"
         
         table.add_row(
-            pid,
-            info["version"],
-            duration_str,
-            info["stdout_log"]
+            str(proc['pid']),
+            proc['version'],
+            status_text,
+            proc.get('start_time', 'Unknown'),
+            cpu,
+            memory
         )
     
     console.print(table) 
