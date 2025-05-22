@@ -12,6 +12,6 @@ def stop(pid):
     success = stop_application(pid)
     
     if success:
-        console.print(f"Instância da aplicação (PID: {pid}) parada com sucesso", style="bold green")
+        console.print(f"Application (PID: {pid}) stopped successfully", style="bold green")
     else:
         console.print(f"Failed to stop application with PID {pid}", style="bold red") 

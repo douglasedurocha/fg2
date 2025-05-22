@@ -122,7 +122,7 @@ def start_application(version):
         }
         save_processes(processes)
         
-        console.print(f"[bold green]Application started successfully. PID: {process.pid}[/bold green]")
+        # Success message moved to command handler
         return process.pid
     
     except Exception as e:
@@ -157,7 +157,7 @@ def stop_application(pid):
             if process.is_running():
                 process.kill()
             
-            console.print(f"[bold green]Stopped application (PID: {pid})[/bold green]")
+            # Success message moved to command handler
         except psutil.NoSuchProcess:
             console.print(f"[bold yellow]Process {pid} is no longer running[/bold yellow]")
         except Exception as e:

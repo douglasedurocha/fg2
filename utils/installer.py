@@ -126,7 +126,7 @@ def install_from_zip(zip_path, version):
         if 'dependencies' in manifest and manifest['dependencies']:
             install_dependencies(manifest['dependencies'], version_dir)
         
-        console.print(f"[bold green]Successfully installed version {version}[/bold green]")
+        # Success message moved to command handler
         return True
     
     except Exception as e:
@@ -192,7 +192,7 @@ def uninstall_version(version):
     
     try:
         shutil.rmtree(version_dir)
-        console.print(f"[bold green]Successfully uninstalled version {version}[/bold green]")
+        # Success message moved to command handler
         return True
     except Exception as e:
         console.print(f"[bold red]Error uninstalling version {version}: {str(e)}[/bold red]")

@@ -31,6 +31,6 @@ def start(version):
     pid = start_application(version)
     
     if pid:
-        console.print(f"Aplicação iniciada com sucesso. PID: {pid}", style="bold green")
+        console.print(f"Application started successfully. PID: {pid}", style="bold green")
     else:
         console.print("Failed to start the application", style="bold red") 
